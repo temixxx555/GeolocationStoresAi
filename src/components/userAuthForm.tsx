@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, FormEvent, useRef } from "react";
@@ -5,10 +6,8 @@ import Link from "next/link";
 import Image from "next/image";
 import InputBox from "@/components/InputBox";
 import { useRouter } from "next/navigation";
-// New components
 import { Eye, EyeOff, MapPin, Globe, ShoppingBag } from "lucide-react";
 import { useAppContext } from "@/context/AppContext";
-
 import toast from "react-hot-toast";
 import { storeInSession } from "@/common/session";
 import axios from "axios";
@@ -29,14 +28,10 @@ export default function UserAuth({ type }: AuthProps) {
   const [rememberMe, setRememberMe] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
-const router = useRouter()
+  const router = useRouter();
 
-  const {
-    userAuth: { access_token },
-    setUserAuth,
-  } = useAppContext();
+  const { userAuth, setUserAuth } = useAppContext();
 
-  // For animation effects
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -47,113 +42,123 @@ const router = useRouter()
     }, 1000);
   }, []);
 
-  const userAuthThroughServer = async (serverRoute: string, formData: Record<string, unknown>) => {
+  useEffect(() => {
+    // Check if user is already authenticated
+    if (userAuth.data?.access_token) {
+      router.push("/");
+    }
+  }, [userAuth.data?.access_token, router]);
+
+  const userAuthThroughServer = async (
+    serverRoute: string,
+    formData: Record<string, unknown>
+  ) => {
+    setIsLoading(true);
     try {
-      const { data } = await axios.post("/api" + serverRoute, formData);
-  
+      const { data } = await axios.post(`/api${serverRoute}`, formData);
+
       if (data.success) {
         storeInSession("user", JSON.stringify(data));
         setUserAuth(data);
+        
+        toast.success(data.message || "Authentication successful!");
+        router.push("/"); 
       }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       toast.error(error?.response?.data?.error || "An error occurred");
-    }
-  };
-  
-  const handleSubmitFunction = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    try {
-      const serverRoute = type == "sign-in" ? "/signin" : "/signup";
-      const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/; // regex for email
-      const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{6,20}$/; // regex for password
-      //formdata
-      // Get form data
-      if (formRef.current) {
-        const form = new FormData(formRef.current);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const formData: Record<string, any> = {};
-
-        for (const [key, value] of form.entries()) {
-          formData[key] = value;
-        }
-
-        const { fullname, state, password, community, email } = formData;
-        if (type !== "sign-in") {
-          if (fullname.length < 3 || fullname.length > 20) {
-            return toast.error("Fullname must be at least 3 letters Long");
-          }
-          if (community.length < 5 || community.length > 20) {
-            return toast.error("community must be at least 5 letters Long");
-          }
-          if (state.length < 5 || state.length > 20) {
-            return toast.error("state must be at least 3 letters Long");
-          }
-        }
-        if (!email) {
-          return toast.error("Email is required");
-        }
-        if (!emailRegex.test(email)) {
-          return toast.error("Email is invalid");
-        }
-        if (!passwordRegex.test(password)) {
-          return toast.error(
-            "Password should be 6 to 20 letters long with a numeric,1 lowercase and 1 uppercase letters "
-          );
-        }
-        console.log(formData);
-        userAuthThroughServer(serverRoute,formData)
-      }
-
-      setIsLoading(false);
-    } catch (error) {
-      console.log(error);
     } finally {
       setIsLoading(false);
     }
   };
-  useEffect(() => {
-    if (access_token) {
-      router.push("/");
+
+  const handleSubmitFunction = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (loading) return; 
+
+    const serverRoute = type === "sign-in" ? "/signin" : "/signup";
+    const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+    const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{6,20}$/;
+
+    if (formRef.current) {
+      const form = new FormData(formRef.current);
+      const formData: Record<string, any> = {};
+
+      for (const [key, value] of form.entries()) {
+        formData[key] = value;
+      }
+
+      const { fullname, state, password, email } = formData;
+
+      if (type === "sign-up") {
+        const trimmedFullname = fullname?.trim();
+        const trimmedState = state?.trim();
+
+        if (
+          !trimmedFullname ||
+          trimmedFullname.length < 3 ||
+          trimmedFullname.length > 20
+        ) {
+          return toast.error("Fullname must be 3–20 characters long");
+        }
+        if (
+          !trimmedState ||
+          trimmedState.length < 5 ||
+          trimmedState.length > 20
+        ) {
+          return toast.error("State must be 5–20 characters long");
+        }
+        formData.fullname = trimmedFullname;
+        formData.state = trimmedState;
+      }
+
+      if (!email) {
+        return toast.error("Email is required");
+      }
+      if (!emailRegex.test(email)) {
+        return toast.error("Email is invalid");
+      }
+      if (!password) {
+        return toast.error("Password is required");
+      }
+      if (!passwordRegex.test(password)) {
+        return toast.error(
+          "Password must be 6–20 characters with a number, one lowercase, and one uppercase letter"
+        );
+      }
+
+      await userAuthThroughServer(serverRoute, formData);
     }
-  }, [access_token,router]);
-  
+  };
+
   const handleGoogleAuth = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate API call
+    // Placeholder for Google auth
+    toast.error("Google authentication not implemented yet");
     setTimeout(() => {
       setIsLoading(false);
-      // Handle navigation or success message
-    }, 2000);
+    }, 1000);
   };
 
   return (
     <div className='min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-white to-purple-50'>
-   
-
       <main className='flex-1 flex items-center justify-center p-4'>
         <div
           className={`w-full max-w-md ${
             mounted ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
           } transition-all duration-700 ease-out`}
         >
-          {/* Location indicator */}
           <div className='flex items-center justify-center mb-5 gap-2 text-sm text-indigo-600'>
             <MapPin className='h-4 w-4' />
             {currentLocation ? currentLocation : "Detecting your location..."}
           </div>
-
-          {/* Auth container */}
           <div className='bg-white/60 backdrop-blur-md rounded-3xl shadow-xl border border-white/70 overflow-hidden'>
-            {/* Top design strip */}
             <div className='h-3 bg-gradient-to-r from-indigo-600 via-purple-500 to-indigo-600 bg-size-200'></div>
-
             <div className='p-8'>
               <div className='text-center mb-8'>
                 <h1 className='text-3xl font-bold text-gray-900'>
-                  {type === "sign-in" ? "Welcome Back" : "Join Zazzer"}
+                  {type === "sign-in" ? "Welcome Back" : "Join Locify"}
                 </h1>
                 <p className='mt-2 text-gray-600'>
                   {type === "sign-in"
@@ -161,14 +166,13 @@ const router = useRouter()
                     : "Create an account to connect with local businesses"}
                 </p>
               </div>
-
               <form
                 ref={formRef}
                 id='formElement'
                 onSubmit={handleSubmitFunction}
                 className='space-y-5'
               >
-                {type !== "sign-in" && (
+                {type === "sign-up" && (
                   <div className='space-y-5'>
                     <InputBox
                       name='fullname'
@@ -176,9 +180,8 @@ const router = useRouter()
                       placeholder='Full Name'
                       icon='fi fi-rr-user'
                     />
-
                     <div className='flex gap-4'>
-                      <div className='w-1/2'>
+                      <div className='w-full'>
                         <label className='text-xs font-medium text-gray-600 mb-1 block'>
                           State
                         </label>
@@ -191,21 +194,9 @@ const router = useRouter()
                           />
                         </div>
                       </div>
-                      <div className='w-1/2'>
-                        <label className='text-xs font-medium text-gray-600 mb-1 block'>
-                          Community
-                        </label>
-                        <input
-                          name='community'
-                          type='text'
-                          placeholder='Community'
-                          className='w-full bg-gray-50 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-400 border border-gray-200'
-                        />
-                      </div>
                     </div>
                   </div>
                 )}
-
                 <div>
                   <label className='text-xs font-medium text-gray-600 mb-1 block'>
                     Email
@@ -219,7 +210,6 @@ const router = useRouter()
                     />
                   </div>
                 </div>
-
                 <div>
                   <label className='text-xs font-medium text-gray-600 mb-1 block'>
                     Password
@@ -246,7 +236,6 @@ const router = useRouter()
                     </button>
                   </div>
                 </div>
-
                 {type === "sign-in" && (
                   <div className='flex items-center justify-between'>
                     <label className='flex items-center'>
@@ -268,7 +257,6 @@ const router = useRouter()
                     </Link>
                   </div>
                 )}
-
                 <button
                   type='submit'
                   disabled={loading}
@@ -284,7 +272,6 @@ const router = useRouter()
                     : "Create Account"}
                 </button>
               </form>
-
               <div className='relative my-6'>
                 <div className='absolute inset-0 flex items-center'>
                   <div className='w-full border-t border-gray-200' />
@@ -295,16 +282,14 @@ const router = useRouter()
                   </span>
                 </div>
               </div>
-
               <button
                 onClick={handleGoogleAuth}
                 disabled={loading}
                 className='w-full flex items-center justify-center gap-2 bg-white border border-gray-300 rounded-xl py-2.5 px-4 font-medium hover:bg-gray-50 transition-all duration-200 disabled:opacity-60'
               >
-                <Image src='/google.png' alt='Google' width={20} height={20} />
+                <Image src='/google.jpeg' alt='Google' width={20} height={20} />
                 <span className='text-sm'>Google</span>
               </button>
-
               <p className='mt-6 text-center text-gray-600 text-sm'>
                 {type === "sign-in"
                   ? "Don't have an account yet?"
@@ -318,8 +303,6 @@ const router = useRouter()
               </p>
             </div>
           </div>
-
-          {/* Features highlight */}
           <div className='mt-10 grid grid-cols-3 gap-4 text-center'>
             <FeatureIcon
               icon={<MapPin className='h-5 w-5 text-indigo-600 mx-auto' />}
@@ -336,8 +319,6 @@ const router = useRouter()
           </div>
         </div>
       </main>
-
-      {/* Footer */}
       <footer className='bg-white/80 backdrop-blur-sm p-4 border-t border-gray-100 text-center text-sm text-gray-600'>
         <div className='max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center'>
           <p>© 2025 Zazzer. All rights reserved.</p>
@@ -357,8 +338,6 @@ const router = useRouter()
     </div>
   );
 }
-
-// UI Components
 
 const FeatureIcon = ({ icon, title }: FeatureIconProps) => {
   return (

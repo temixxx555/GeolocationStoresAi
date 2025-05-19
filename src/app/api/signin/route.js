@@ -1,79 +1,102 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken"; // Added missing import
 import User from "../../../models/User";
+import connectDB from "../../../config/db";
 
+// Email regex for validation
 const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
-const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{6,20}$/;
+
+// Format data to send
+const formatDataToSend = (user) => {
+  const access_token = jwt.sign(
+    { id: user._id },
+    process.env.SECRET_ACCESS_KEY
+  );
+  return {
+    access_token,
+    profile_img: user.personal_info.profile_img,
+    username: user.personal_info.username,
+    fullname: user.personal_info.fullname,
+    state: user.personal_info.state,
+  };
+};
 
 export async function POST(request) {
   try {
-    const { fullname, state, password, community, email } = await request.json();
-
-    // Fullname Validation
-    if (fullname.length < 3 || fullname.length > 20) {
-      return NextResponse.json({ error: "Fullname must be between 3 and 20 characters." }, { status: 403 });
+    // Ensure database is connected
+    const isConnected = await connectDB();
+    if (!isConnected) {
+      return NextResponse.json(
+        { error: "Database connection failed." },
+        { status: 500 }
+      );
     }
 
-    // Community Validation
-    if (community.length < 5 || community.length > 20) {
-      return NextResponse.json({ error: "Community must be between 5 and 20 characters." }, { status: 403 });
+    const body = await request.json();
+    const { email, password } = body;
+
+    // Validate presence and type
+    if (!email || typeof email !== "string") {
+      return NextResponse.json(
+        { error: "Email is required and must be a string." },
+        { status: 400 }
+      );
+    }
+    if (!password || typeof password !== "string") {
+      return NextResponse.json(
+        { error: "Password is required and must be a string." },
+        { status: 400 }
+      );
     }
 
-    // State Validation
-    if (state.length < 5 || state.length > 20) {
-      return NextResponse.json({ error: "State must be between 5 and 20 characters." }, { status: 403 });
-    }
-
-    // Email Validation
-    if (!email) {
-      return NextResponse.json({ error: "Email is required" }, { status: 403 });
-    }
+    // Validate email format
     if (!emailRegex.test(email)) {
-      return NextResponse.json({ error: "Email is invalid" }, { status: 403 });
+      return NextResponse.json({ error: "Email is invalid." }, { status: 400 });
     }
 
-    // Password Validation
-    if (!passwordRegex.test(password)) {
-      return NextResponse.json({
-        error: "Password should be 6 to 20 characters long with at least one numeric, one lowercase, and one uppercase letter.",
-      }, { status: 403 });
+    // Find user by email
+    const user = await User.findOne({ "personal_info.email": email });
+    if (!user) {
+      return NextResponse.json({ error: "Email not found." }, { status: 403 });
     }
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Check for Google auth
+    if (user.google_auth) {
+      return NextResponse.json(
+        {
+          error: "Account was created with Google. Please sign in with Google.",
+        },
+        { status: 403 }
+      );
+    }
 
-    // Create the username (combining fullname and email)
-    const username = `${fullname}${email}`;
+    // Compare password
+    const isMatch = await bcrypt.compare(
+      password,
+      user.personal_info.password
+    );
+    if (!isMatch) {
+      return NextResponse.json(
+        { error: "Incorrect password." },
+        { status: 403 }
+      );
+    }
 
-    // Create new user instance
-    const user = new User({
-      personal_info: {
-        fullname,
-        email,
-        password: hashedPassword,
-        username,
+    // Return formatted response
+    return NextResponse.json(
+      {
+        success: true,
+        message: "User signed in successfully.",
+        data: formatDataToSend(user),
       },
-    });
-
-    // Save the user to the database
-    const newUser = await user.save();
-
-    return NextResponse.json(formatDataToSend(newUser), { status: 200 });
-    
+      { status: 200 }
+    );
   } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("POST /signin error:", error);
+    return NextResponse.json(
+      { error: "Server error, please try again." },
+      { status: 500 }
+    );
   }
-}
-
-function formatDataToSend(user) {
-  // Format user data for the response
-  return {
-    message: "User created successfully",
-    user: {
-      fullname: user.personal_info.fullname,
-      email: user.personal_info.email,
-      username: user.personal_info.username,
-    },
-  };
 }
